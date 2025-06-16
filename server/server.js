@@ -64,6 +64,7 @@ class MafiaGameServer {
       console.log("🔌 Создание WebSocket сервера...")
       this.wss = new WebSocket.Server({
         server: this.server,
+        path: "/ws",
         perMessageDeflate: false, // Отключаем сжатие для отладки
         clientTracking: true,
         maxPayload: 100 * 1024 * 1024, // 100MB
@@ -75,7 +76,7 @@ class MafiaGameServer {
           console.log(`🔗 URL: ${info.req.url}`)
           console.log(`🔧 Headers:`, JSON.stringify(info.req.headers, null, 2))
           console.log(`✅ Подключение разрешено`)
-          console.log(`🔍🔍🔍🔍🔍🔍🔍🔍🔍🔍🔍🔍🔍🔍🔍🔍🔍🔍🔍🔍`)
+          console.log(`🔍🔍🔍🔍🔍🔍🔍🔍🔍🔍🔍🔍🔍🔍🔍🔍🔍🔍🔍`)
           return true
         },
       })
@@ -234,13 +235,10 @@ class MafiaGameServer {
       this.app.get("/", (req, res) => {
         console.log("🏠 ЗАПРОС ГЛАВНОЙ СТРАНИЦЫ!")
         const response = {
-          message: "🎭 Mafia Game Server работает!",
-          version: "2.0.0",
-          status: "running",
-          uptime: Math.floor(process.uptime()),
+          status: "OK",
+          message: "Mafia Game Server is running!",
           timestamp: new Date().toISOString(),
           port: this.port,
-          env: process.env.NODE_ENV,
         }
         console.log("📤 Отправка ответа:", response)
         res.json(response)
@@ -248,11 +246,11 @@ class MafiaGameServer {
 
       // Health check для Render
       this.app.get("/health", (req, res) => {
-        console.log("🏥 HEALTH CHECK ЗАПРОС!")
+        console.log("❤️ Health check requested")
         const response = {
           status: "healthy",
-          timestamp: new Date().toISOString(),
           uptime: process.uptime(),
+          timestamp: new Date().toISOString(),
         }
         console.log("📤 Health check ответ:", response)
         res.json(response)
@@ -375,7 +373,7 @@ class MafiaGameServer {
         console.log(`🌐 HTTP: http://localhost:${this.port}`)
         console.log(`🏥 Health: http://localhost:${this.port}/health`)
         console.log(`🧪 Test: http://localhost:${this.port}/test`)
-        console.log(`🔌 WebSocket: ws://localhost:${this.port}`)
+        console.log(`🔌 WebSocket: ws://localhost:${this.port}/ws`)
         console.log("=" * 100)
       })
 
