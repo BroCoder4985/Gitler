@@ -7,22 +7,8 @@ export default function Page() {
         fontFamily: "Arial, sans-serif",
       }}
     >
-      <h1>🎭 Mafia Game Server</h1>
-      <p>Сервер запущен и готов к игре!</p>
-      <div style={{ marginTop: "20px" }}>
-        <a
-          href="/game"
-          style={{
-            background: "#667eea",
-            color: "white",
-            padding: "10px 20px",
-            textDecoration: "none",
-            borderRadius: "5px",
-          }}
-        >
-          🎮 Играть
-        </a>
-      </div>
+      <h1>🎭 Mafia Game</h1>
+      <p>Это Next.js заглушка. Игра работает через мобильное приложение.</p>
     </div>
   )
 }
