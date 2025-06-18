@@ -65,11 +65,27 @@ class MafiaGameServer {
         clientTracking: true,
         maxPayload: 100 * 1024 * 1024,
         verifyClient: (info) => {
-          console.log(`🔍 WebSocket verifyClient от ${info.req.socket.remoteAddress}`)
+          const ip = info.req.socket.remoteAddress
+          const origin = info.req.headers.origin
+          console.log(`🔍 WebSocket verifyClient от ${ip}, origin: ${origin}`)
+          console.log(`🔍 Headers:`, JSON.stringify(info.req.headers, null, 2))
           return true
         },
       })
       console.log("✅ WebSocket сервер создан")
+
+      // Логирование событий WebSocket сервера
+      this.wss.on("listening", () => {
+        console.log("🎉 WebSocket сервер начал слушать!")
+      })
+
+      this.wss.on("error", (error) => {
+        console.error("❌ ОШИБКА WebSocket СЕРВЕРА:", error)
+      })
+
+      this.wss.on("headers", (headers, request) => {
+        console.log("📋 WebSocket headers:", headers)
+      })
 
       console.log("💾 Создание Database...")
       this.db = new Database()
@@ -116,6 +132,7 @@ class MafiaGameServer {
     this.app.use((req, res, next) => {
       const startTime = Date.now()
       console.log(`📥 ${req.method} ${req.url} от ${req.ip}`)
+      console.log(`📋 Headers:`, JSON.stringify(req.headers, null, 2))
 
       res.on("finish", () => {
         const duration = Date.now() - startTime
@@ -131,63 +148,53 @@ class MafiaGameServer {
   setupRoutes() {
     console.log("🛣️ Настройка маршрутов...")
 
-    // ГЛАВНАЯ СТРАНИЦА - ТОЛЬКО СТАТУС СЕРВЕРА
+    // ГЛАВНАЯ СТРАНИЦА - ВОЗВРАЩАЕМ ИГРУ
     this.app.get("/", async (req, res) => {
-      console.log("🏠 ЗАПРОС СТАТУСА СЕРВЕРА!")
+      console.log("🏠 ЗАПРОС ГЛАВНОЙ СТРАНИЦЫ!")
 
       try {
-        // Получаем статистику из базы данных
-        const dbStats = await this.db.getStats()
+        // Читаем HTML файл игры
+        const htmlPath = path.join(__dirname, "..", "app", "src", "main", "assets", "index.html")
+        console.log(`📁 Путь к HTML: ${htmlPath}`)
 
-        // Получаем список комнат
-        const rooms = await this.db.getRooms()
-        const roomsList = []
+        if (fs.existsSync(htmlPath)) {
+          const html = fs.readFileSync(htmlPath, "utf8")
+          console.log("✅ HTML файл найден и прочитан")
 
-        for (const room of rooms) {
-          const roomData = this.wsHandler.rooms.get(room.id)
-          roomsList.push({
-            id: room.id,
-            name: room.name,
-            status: room.status,
-            players: roomData ? roomData.players.length : 0,
-            maxPlayers: room.max_players,
-            creator: room.creator_nickname,
-            hasPassword: room.hasPassword,
-            createdAt: room.created_at,
-          })
+          // Заменяем WebSocket URL на правильный для продакшена
+          const modifiedHtml = html.replace(/const WS_URL = '[^']*'/, `const WS_URL = 'wss://${req.get("host")}/ws'`)
+
+          res.setHeader("Content-Type", "text/html; charset=utf-8")
+          res.send(modifiedHtml)
+        } else {
+          console.log("❌ HTML файл не найден, отправляем статус")
+
+          // Если файла нет, отправляем статус сервера
+          const dbStats = await this.db.getStats()
+          const response = {
+            server: "🎭 Mafia Game Server",
+            status: "running",
+            message: "HTML файл игры не найден",
+            timestamp: new Date().toISOString(),
+            uptime: Math.floor(process.uptime()),
+            websocket: {
+              url: `wss://${req.get("host")}/ws`,
+              clients: this.wss.clients.size,
+              ready: true,
+            },
+            game: {
+              totalUsers: dbStats.totalUsers,
+              onlineUsers: this.wsHandler.users.size,
+              activeRooms: this.wsHandler.rooms.size,
+            },
+          }
+
+          res.json(response)
         }
-
-        const response = {
-          server: "🎭 Mafia Game Server",
-          status: "running",
-          timestamp: new Date().toISOString(),
-          uptime: Math.floor(process.uptime()),
-          memory: {
-            used: Math.round(process.memoryUsage().heapUsed / 1024 / 1024),
-            total: Math.round(process.memoryUsage().heapTotal / 1024 / 1024),
-          },
-          websocket: {
-            clients: this.wss.clients.size,
-            ready: this.wss.readyState === 1,
-            path: "/ws",
-          },
-          game: {
-            totalUsers: dbStats.totalUsers,
-            totalGames: dbStats.totalGames,
-            onlineUsers: this.wsHandler.users.size,
-            authenticatedUsers: Array.from(this.wsHandler.users.values()).filter((u) => u.isAuthenticated).length,
-            activeRooms: this.wsHandler.rooms.size,
-            activeGames: this.gameEngine.getGameStats().activeGames,
-          },
-          rooms: roomsList,
-        }
-
-        console.log("📤 Отправка статуса сервера")
-        res.json(response)
       } catch (error) {
-        console.error("❌ Ошибка получения статуса:", error)
+        console.error("❌ Ошибка обработки главной страницы:", error)
         res.status(500).json({
-          error: "Ошибка получения статуса сервера",
+          error: "Ошибка сервера",
           message: error.message,
           timestamp: new Date().toISOString(),
         })
@@ -201,7 +208,52 @@ class MafiaGameServer {
         status: "healthy",
         uptime: process.uptime(),
         timestamp: new Date().toISOString(),
+        websocket: {
+          clients: this.wss.clients.size,
+          ready: true,
+        },
       })
+    })
+
+    // API статус
+    this.app.get("/api/status", async (req, res) => {
+      console.log("📊 API статус запрос")
+
+      try {
+        const dbStats = await this.db.getStats()
+        const response = {
+          server: "🎭 Mafia Game Server",
+          status: "running",
+          timestamp: new Date().toISOString(),
+          uptime: Math.floor(process.uptime()),
+          memory: {
+            used: Math.round(process.memoryUsage().heapUsed / 1024 / 1024),
+            total: Math.round(process.memoryUsage().heapTotal / 1024 / 1024),
+          },
+          websocket: {
+            url: `wss://${req.get("host")}/ws`,
+            clients: this.wss.clients.size,
+            ready: true,
+          },
+          game: {
+            totalUsers: dbStats.totalUsers,
+            totalGames: dbStats.totalGames,
+            onlineUsers: this.wsHandler.users.size,
+            authenticatedUsers: Array.from(this.wsHandler.users.values()).filter((u) => u.isAuthenticated).length,
+            activeRooms: this.wsHandler.rooms.size,
+            activeGames: this.gameEngine.getGameStats().activeGames,
+          },
+        }
+
+        res.json(response)
+      } catch (error) {
+        console.error("❌ Ошибка получения статуса:", error)
+        res.status(500).json({
+          error: "Ошибка получения статуса сервера",
+          message: error.message,
+          timestamp: new Date().toISOString(),
+        })
+      }
     })
 
     // Простой тест
@@ -210,6 +262,7 @@ class MafiaGameServer {
       res.json({
         test: "OK",
         message: "Сервер работает!",
+        websocket_url: `wss://${req.get("host")}/ws`,
         timestamp: new Date().toISOString(),
       })
     })
@@ -219,8 +272,8 @@ class MafiaGameServer {
       console.log("🔌 WebSocket тест")
       res.json({
         websocket: "available",
+        url: `wss://${req.get("host")}/ws`,
         clients: this.wss.clients.size,
-        path: "/ws",
         ready: true,
         timestamp: new Date().toISOString(),
       })
@@ -231,7 +284,11 @@ class MafiaGameServer {
       console.log("🧪 Тестовая страница WebSocket")
       try {
         const htmlPath = path.join(__dirname, "test-websocket.html")
-        const html = fs.readFileSync(htmlPath, "utf8")
+        let html = fs.readFileSync(htmlPath, "utf8")
+
+        // Заменяем URL на правильный
+        html = html.replace(/const wsUrl = `[^`]*`/, `const wsUrl = \`wss://${req.get("host")}/ws\``)
+
         res.setHeader("Content-Type", "text/html")
         res.send(html)
       } catch (error) {
@@ -253,7 +310,8 @@ class MafiaGameServer {
         error: "Маршрут не найден",
         path: req.path,
         method: req.method,
-        available_endpoints: ["/", "/health", "/test", "/ws-test", "/test-ws"],
+        available_endpoints: ["/", "/health", "/api/status", "/test", "/ws-test", "/test-ws"],
+        websocket_url: `wss://${req.get("host")}/ws`,
         timestamp: new Date().toISOString(),
       })
     })
@@ -288,6 +346,7 @@ class MafiaGameServer {
         console.log(`🚀 Mafia Game Server работает на порту ${this.port}`)
         console.log(`🌐 HTTP: http://localhost:${this.port}`)
         console.log(`🔌 WebSocket: ws://localhost:${this.port}/ws`)
+        console.log(`🔌 WebSocket (WSS): wss://localhost:${this.port}/ws`)
       })
 
       this.server.on("error", (error) => {
@@ -298,9 +357,16 @@ class MafiaGameServer {
         process.exit(1)
       })
 
+      this.server.on("upgrade", (request, socket, head) => {
+        console.log("🔄 HTTP UPGRADE запрос для WebSocket")
+        console.log(`🔗 URL: ${request.url}`)
+        console.log(`📋 Headers:`, JSON.stringify(request.headers, null, 2))
+      })
+
       // Запускаем сервер
       this.server.listen(this.port, "0.0.0.0", () => {
         console.log(`✅ Сервер запущен на 0.0.0.0:${this.port}`)
+        console.log(`🔌 WebSocket доступен по пути /ws`)
       })
 
       // Обработка сигналов завершения
@@ -310,7 +376,7 @@ class MafiaGameServer {
       // Логируем статистику каждые 30 секунд
       setInterval(() => {
         console.log(
-          `📊 Время работы: ${Math.floor(process.uptime())}с, Память: ${Math.round(process.memoryUsage().heapUsed / 1024 / 1024)}MB, Клиентов: ${this.wss.clients.size}`,
+          `📊 Время работы: ${Math.floor(process.uptime())}с, Память: ${Math.round(process.memoryUsage().heapUsed / 1024 / 1024)}MB, WebSocket клиентов: ${this.wss.clients.size}`,
         )
       }, 30000)
     } catch (error) {
@@ -337,12 +403,12 @@ class MafiaGameServer {
 // ГЛОБАЛЬНЫЕ ОБРАБОТЧИКИ ОШИБОК
 process.on("uncaughtException", (error) => {
   console.error("❌ UNCAUGHT EXCEPTION:", error)
-  process.exit(1)
+  console.error("Stack:", error.stack)
 })
 
 process.on("unhandledRejection", (reason, promise) => {
   console.error("❌ UNHANDLED REJECTION:", reason)
-  process.exit(1)
+  console.error("Promise:", promise)
 })
 
 // Запуск сервера
