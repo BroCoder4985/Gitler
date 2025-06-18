@@ -1125,8 +1125,8 @@ class WebSocketHandler {
           phase: room.game.phase,
           day: room.game.day,
           timeLeft: room.game.timeLeft,
-          lastAction: room.game.lastAction,
           votingResults: room.game.votingResults,
+          lastAction: room.game.lastAction,
         },
       })
     } catch (error) {

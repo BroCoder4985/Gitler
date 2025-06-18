@@ -239,6 +239,10 @@ class MafiaGameServer {
           message: "Mafia Game Server is running!",
           timestamp: new Date().toISOString(),
           port: this.port,
+          websocket: "available",
+          clients: this.wss.clients.size,
+          rooms: this.wsHandler ? this.wsHandler.rooms.size : 0,
+          users: this.wsHandler ? this.wsHandler.users.size : 0,
         }
         console.log("📤 Отправка ответа:", response)
         res.json(response)
@@ -264,6 +268,29 @@ class MafiaGameServer {
           message: "Сервер работает нормально!",
           timestamp: new Date().toISOString(),
         })
+      })
+
+      // Статус сервера
+      this.app.get("/status", (req, res) => {
+        console.log("📊 ЗАПРОС СТАТУСА СЕРВЕРА!")
+        const response = {
+          server: "Mafia Game Server",
+          status: "running",
+          timestamp: new Date().toISOString(),
+          uptime: process.uptime(),
+          memory: process.memoryUsage(),
+          websocket: {
+            clients: this.wss.clients.size,
+            ready: this.wss.readyState === 1,
+          },
+          game: {
+            rooms: this.wsHandler ? this.wsHandler.rooms.size : 0,
+            users: this.wsHandler ? this.wsHandler.users.size : 0,
+            games: this.gameEngine ? this.gameEngine.getGameStats() : { activeGames: 0 },
+          },
+        }
+        console.log("📤 Статус сервера:", response)
+        res.json(response)
       })
 
       // Тестовая страница WebSocket
@@ -298,6 +325,36 @@ class MafiaGameServer {
 
       // API маршруты
       this.app.use("/api", this.createApiRoutes())
+
+      // Игровой интерфейс
+      this.app.get("/game", (req, res) => {
+        console.log("🎮 ЗАПРОС ИГРОВОГО ИНТЕРФЕЙСА!")
+        const fs = require("fs")
+        const path = require("path")
+
+        try {
+          const htmlPath = path.join(__dirname, "..", "app", "src", "main", "assets", "index.html")
+          console.log("📁 Путь к HTML:", htmlPath)
+
+          if (fs.existsSync(htmlPath)) {
+            const html = fs.readFileSync(htmlPath, "utf8")
+            res.setHeader("Content-Type", "text/html")
+            res.send(html)
+          } else {
+            console.log("❌ HTML файл не найден")
+            res.status(404).json({
+              error: "Game interface not found",
+              path: htmlPath,
+            })
+          }
+        } catch (error) {
+          console.error("❌ Ошибка загрузки игрового интерфейса:", error)
+          res.status(500).json({
+            error: "Failed to load game interface",
+            message: error.message,
+          })
+        }
+      })
 
       console.log("✅ Маршруты настроены")
     } catch (error) {

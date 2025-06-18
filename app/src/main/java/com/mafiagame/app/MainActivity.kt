@@ -80,7 +80,7 @@ class MainActivity : AppCompatActivity() {
         }
         
         webView.webChromeClient = object : WebChromeClient() {
-            override fun onConsoleMessage(consoleMessage?): Boolean {
+            override fun onConsoleMessage(consoleMessage: ConsoleMessage?): Boolean {
                 consoleMessage?.let {
                     println("WebView Console: ${it.message()}")
                 }

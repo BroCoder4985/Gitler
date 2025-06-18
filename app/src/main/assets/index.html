@@ -1294,8 +1294,8 @@
         let deviceId = null;
         let sessionId = null;
 
-        // WebSocket URL - замените на ваш сервер
-        const WS_URL = 'wss://gliterrok-2.onrender.com';
+        // WebSocket URL - ИСПРАВЛЕННЫЙ URL С WSS И ПУТЁМ
+        const WS_URL = 'wss://1-tth2.onrender.com/ws';
 
         // Генерация deviceId
         function generateDeviceId() {
@@ -1361,6 +1361,7 @@
         // Инициализация
         document.addEventListener('DOMContentLoaded', function() {
             console.log('🚀 Инициализация приложения');
+            console.log('🔌 WebSocket URL:', WS_URL);
             
             // Генерируем deviceId
             generateDeviceId();
@@ -1475,6 +1476,7 @@
 
             isConnecting = true;
             console.log(`🔌 Подключение к серверу (попытка ${reconnectAttempts + 1}/${maxReconnectAttempts})`);
+            console.log(`🔗 URL: ${WS_URL}`);
 
             try {
                 // Закрываем предыдущее соединение если есть
@@ -1619,6 +1621,11 @@
                     gameState = data.game;
                     saveUserSession();
                     updateGameRoom();
+                    
+                    // Показываем результаты действий
+                    if (data.game.lastAction) {
+                        showNotification(data.game.lastAction, 'warning');
+                    }
                     break;
 
                 case 'gameEnded':
@@ -2092,6 +2099,39 @@
             updatePlayersGrid();
             updateGameHeader();
             updateGameActions();
+            // Показываем кнопку старта игры для создателя
+            updateStartGameButton();
+        }
+
+        function updateStartGameButton() {
+            // Удаляем существующую кнопку если есть
+            const existingButton = document.getElementById('startGameButton');
+            if (existingButton) {
+                existingButton.remove();
+            }
+            
+            if (!currentRoom || currentRoom.status !== 'waiting') return;
+            
+            const currentPlayer = currentRoom.players.find(p => p.nickname === currentUser.nickname);
+            if (!currentPlayer || !currentPlayer.isCreator) return;
+            
+            if (currentRoom.players.length < currentRoom.minPlayers) return;
+            
+            // Создаем кнопку старта
+            const gameMain = document.querySelector('.game-main');
+            const startButton = document.createElement('div');
+            startButton.id = 'startGameButton';
+            startButton.className = 'card';
+            startButton.style.textAlign = 'center';
+            startButton.innerHTML = `
+                <h3 style="color: #667eea; margin-bottom: 15px;">🎮 Готовы начать?</h3>
+                <p style="margin-bottom: 15px;">Игроков: ${currentRoom.players.length}/${currentRoom.maxPlayers}</p>
+                <button class="btn btn-success" onclick="startGame()" style="font-size: 1.2em; padding: 15px 30px;">
+                    🚀 НАЧАТЬ ИГРУ
+                </button>
+            `;
+            
+            gameMain.appendChild(startButton);
         }
 
         function updatePlayersGrid() {
@@ -2156,228 +2196,124 @@
                 if (currentPlayer && currentPlayer.role) {
                     gameRoleElement.textContent = `Ваша роль: ${getRoleName(currentPlayer.role)}`;
                 }
+
+                // После отображения роли игрока добавьте:
+                if (gameState.votingResults && Object.keys(gameState.votingResults).length > 0) {
+                    const votingHtml = Object.entries(gameState.votingResults)
+                        .sort(([,a], [,b]) => b - a)
+                        .map(([player, votes]) => `${player}: ${votes} голос(ов)`)
+                        .join('<br>');
+                    gameRoleElement.innerHTML += `<br><div style="color: #f39c12; margin-top: 10px;">🗳️ Результаты голосования:<br>${votingHtml}</div>`;
+                }
             }
         }
 
         function updateGameActions() {
             const gameActions = document.getElementById('gameActions');
-            if (!gameActions) return;
+            if (!gameActions || !currentRoom || !gameState) {
+                gameActions?.classList.add('hidden');
+                return;
+            }
 
-            // Пока скрываем игровые действия
-            gameActions.classList.add('hidden');
-        }
+            const currentPlayer = currentRoom.players.find(p => p.nickname === currentUser.nickname);
+            if (!currentPlayer || !currentPlayer.isAlive) {
+                gameActions.classList.add('hidden');
+                return;
+            }
 
-        function selectPlayer(nickname) {
-            if (selectedPlayer === nickname) {
-                selectedPlayer = null;
+            const actionTitle = document.getElementById('actionTitle');
+            const actionButtons = document.getElementById('actionButtons');
+            
+            // В начале функции добавьте:
+            const savedAction = localStorage.getItem('playerAction');
+            let hasActed = false;
+            if (savedAction) {
+                try {
+                    const actionData = JSON.parse(savedAction);
+                    hasActed = actionData.phase === gameState.phase && actionData.day === gameState.day;
+                } catch (e) {}
+            }
+
+            if (hasActed) {
+                actionTitle.textContent = '✅ Вы уже сделали свой ход';
+                actionButtons.innerHTML = '<p style="color: #27ae60;">Ожидайте действий других игроков...</p>';
+                gameActions.classList.remove('hidden');
+                return;
+            }
+            
+            let showActions = false;
+            let title = '';
+            let buttons = '';
+
+            // Ночные действия
+            if (gameState.phase === 'night') {
+                if (currentPlayer.role === 'mafia' || currentPlayer.role === 'don') {
+                    showActions = true;
+                    title = '🔫 Выберите цель для убийства:';
+                    buttons = currentRoom.players
+                        .filter(p => p.isAlive && p.nickname !== currentUser.nickname && !['mafia', 'don'].includes(p.role))
+                        .map(p => `<button class="btn btn-danger" onclick="makeGameAction('kill', '${p.nickname}')">${p.avatar} ${p.nickname}</button>`)
+                        .join('');
+                } else if (currentPlayer.role === 'doctor') {
+                    showActions = true;
+                    title = '👨‍⚕️ Выберите кого лечить:';
+                    buttons = currentRoom.players
+                        .filter(p => p.isAlive)
+                        .map(p => `<button class="btn btn-success" onclick="makeGameAction('heal', '${p.nickname}')">${p.avatar} ${p.nickname}</button>`)
+                        .join('');
+                }
+            }
+            
+            // Дневное голосование
+            else if (gameState.phase === 'day') {
+                showActions = true;
+                title = '🗳️ Голосование - выберите кого исключить:';
+                buttons = currentRoom.players
+                    .filter(p => p.isAlive)
+                    .map(p => `<button class="btn ${p.nickname === currentUser.nickname ? 'btn-secondary' : ''}" onclick="makeGameAction('vote', '${p.nickname}')">${p.avatar} ${p.nickname}</button>`)
+                    .join('');
+                buttons += '<button class="btn btn-secondary" onclick="makeGameAction(\'vote\', null)">Воздержаться</button>';
+            }
+
+            if (showActions) {
+                actionTitle.textContent = title;
+                actionButtons.innerHTML = buttons;
+                gameActions.classList.remove('hidden');
             } else {
-                selectedPlayer = nickname;
+                gameActions.classList.add('hidden');
             }
-            updatePlayersGrid();
         }
 
-        function showPlayerProfile(nickname) {
-            console.log('👤 Запрос профиля игрока:', nickname);
-            sendWebSocketMessage({
-                type: 'getUserProfile',
-                nickname: nickname
-            });
-        }
-
-        function showUserProfile(profile) {
-            const modal = document.getElementById('profileModal');
-            const content = document.getElementById('profileContent');
+        function makeGameAction(action, target) {
+            console.log(`🎮 Игровое действие: ${action} -> ${target}`);
             
-            if (!modal || !content) return;
-
-            content.innerHTML = `
-                <div class="profile-avatar">${profile.avatar}</div>
-                <div class="profile-nickname">${profile.nickname}</div>
-                ${profile.is_admin ? '<div style="text-align: center; margin-bottom: 15px;"><span class="admin-badge">👑 БОГ</span></div>' : ''}
-                <div style="text-align: center; color: #f39c12; font-size: 1.2em; margin-bottom: 20px;">
-                    💰 ${profile.coins} монет
-                </div>
-                <div class="profile-stats">
-                    <div class="profile-stat">
-                        <div class="profile-stat-value">${profile.games_played || 0}</div>
-                        <div class="profile-stat-label">Игр сыграно</div>
-                    </div>
-                    <div class="profile-stat">
-                        <div class="profile-stat-value">${profile.games_won || 0}</div>
-                        <div class="profile-stat-label">Побед</div>
-                    </div>
-                    <div class="profile-stat">
-                        <div class="profile-stat-value">${profile.games_survived || 0}</div>
-                        <div class="profile-stat-label">Выжил</div>
-                    </div>
-                    <div class="profile-stat">
-                        <div class="profile-stat-value">${profile.games_played > 0 ? Math.round((profile.games_won / profile.games_played) * 100) : 0}%</div>
-                        <div class="profile-stat-label">Винрейт</div>
-                    </div>
-                </div>
-                <div style="margin-top: 20px; text-align: center; color: #666; font-size: 0.9em;">
-                    <div>Зарегистрирован: ${new Date(profile.created_at).toLocaleDateString()}</div>
-                    <div>Последний вход: ${new Date(profile.last_login).toLocaleDateString()}</div>
-                </div>
-            `;
-
-            // Применяем эффекты никнейма
-            const nicknameElement = content.querySelector('.profile-nickname');
-            if (nicknameElement && profile.nickname_effects) {
-                applyNicknameEffects(nicknameElement, profile.nickname_effects);
-            }
-
-            modal.classList.remove('hidden');
-        }
-
-        function hideProfileModal() {
-            const modal = document.getElementById('profileModal');
-            if (modal) {
-                modal.classList.add('hidden');
-            }
-        }
-
-        function startGame() {
-            console.log('🎮 Запуск игры');
-            sendWebSocketMessage({ type: 'startGame' });
-        }
-
-        // Чат
-        function sendMessage() {
-            const chatInput = document.getElementById('chatInput');
-            if (!chatInput) return;
-
-            const message = chatInput.value.trim();
-            if (!message) return;
-
-            if (message.length > 200) {
-                showNotification('Сообщение слишком длинное', 'error');
-                return;
-            }
-
-            console.log('💬 Отправка сообщения:', message);
-
-            sendWebSocketMessage({
-                type: 'chatMessage',
-                message: message
-            });
-
-            chatInput.value = '';
-        }
-
-        function addChatMessage(data) {
-            const chatMessages = document.getElementById('chatMessages');
-            if (!chatMessages) return;
-
-            const messageElement = document.createElement('div');
-            messageElement.className = `message ${data.sender === 'Система' ? 'system' : ''}`;
+            // Сохраняем что игрок уже сделал действие
+            localStorage.setItem('playerAction', JSON.stringify({
+                action: action,
+                target: target,
+                phase: gameState.phase,
+                day: gameState.day
+            }));
             
-            const time = new Date(data.timestamp).toLocaleTimeString();
+            sendWebSocketMessage({
+                type: 'gameAction',
+                action: {
+                    action: action,
+                    target: target
+                }
+            });
             
-            messageElement.innerHTML = `
-                <span class="message-sender">${data.sender}:</span>
-                ${data.message}
-                <span class="message-time">${time}</span>
-            `;
-
-            chatMessages.appendChild(messageElement);
-            chatMessages.scrollTop = chatMessages.scrollHeight;
-
-            // Ограничиваем количество сообщений
-            while (chatMessages.children.length > 100) {
-                chatMessages.removeChild(chatMessages.firstChild);
-            }
-        }
-
-        function clearChatMessages() {
-            const chatMessages = document.getElementById('chatMessages');
-            if (chatMessages) {
-                chatMessages.innerHTML = '';
-            }
-        }
-
-        // Магазин
-        function buyEffect(effect, price) {
-            if (!currentUser) {
-                showNotification('Вы не авторизованы', 'error');
-                return;
-            }
-
-            if (currentUser.coins < price) {
-                showNotification('Недостаточно монет', 'error');
-                return;
-            }
-
-            if (currentUser.nickname_effects && currentUser.nickname_effects.includes(effect)) {
-                showNotification('У вас уже есть этот эффект', 'warning');
-                return;
-            }
-
-            console.log('🛒 Покупка эффекта:', effect);
-
-            sendWebSocketMessage({
-                type: 'buyEffect',
-                effect: effect
-            });
-        }
-
-        // Админские функции в комнате
-        function adminAddBot() {
-            const botName = document.getElementById('roomBotName').value.trim();
-            const botAvatar = document.getElementById('roomBotAvatar').value;
-
-            if (!botName) {
-                showNotification('Введите имя бота', 'error');
-                return;
-            }
-
-            sendWebSocketMessage({
-                type: 'addBot',
-                botName: botName,
-                botAvatar: botAvatar
-            });
-
-            document.getElementById('roomBotName').value = '';
-        }
-
-        function adminRemoveBot() {
-            const botName = document.getElementById('roomRemoveBotName').value.trim();
-
-            if (!botName) {
-                showNotification('Введите имя бота', 'error');
-                return;
-            }
-
-            sendWebSocketMessage({
-                type: 'removeBot',
-                botName: botName
-            });
-
-            document.getElementById('roomRemoveBotName').value = '';
-        }
-
-        function adminForceEndGame() {
-            if (confirm('Вы уверены, что хотите завершить игру?')) {
-                sendWebSocketMessage({
-                    type: 'forceEndGame',
-                    roomId: currentRoom ? currentRoom.id : null
-                });
-            }
-        }
-
-        // Автостарт таймер
-        function showAutoStartTimer(timeLeft, reason) {
-            const gamePhaseElement = document.getElementById('gamePhase');
-            if (gamePhaseElement) {
-                gamePhaseElement.innerHTML = `
-                    ${reason}<br>
-                    <span style="color: #e74c3c; font-size: 1.2em;">Автостарт через ${timeLeft} сек</span>
-                `;
-            }
-        }
-
-        function hideAutoStartTimer() {
-            updateGameHeader();
+            // Показываем что действие принято
+            const actionName = {
+                'kill': 'убийство',
+                'heal': 'лечение', 
+                'vote': 'голосование'
+            }[action] || action;
+            
+            showNotification(`${actionName.charAt(0).toUpperCase() + actionName.slice(1)} выполнено`, 'success');
+            
+            // Обновляем интерфейс
+            updateGameActions();
         }
 
         // Вспомогательные функции
@@ -2430,6 +2366,11 @@
                 sendWebSocketMessage({ type: 'ping' });
             }
         }, 30000); // Каждые 30 секунд
+
+        function startGame() {
+            console.log('🚀 Запрос на старт игры');
+            sendWebSocketMessage({ type: 'startGame' });
+        }
     </script>
 </body>
 </html>
