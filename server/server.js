@@ -153,19 +153,25 @@ class MafiaGameServer {
       console.log("🏠 ЗАПРОС ГЛАВНОЙ СТРАНИЦЫ!")
 
       try {
-        // Читаем HTML файл игры
+        // Исправляем путь к HTML файлу
         const htmlPath = path.join(__dirname, "..", "app", "src", "main", "assets", "index.html")
         console.log(`📁 Путь к HTML: ${htmlPath}`)
+        console.log(`📁 Файл существует: ${fs.existsSync(htmlPath)}`)
 
         if (fs.existsSync(htmlPath)) {
           const html = fs.readFileSync(htmlPath, "utf8")
           console.log("✅ HTML файл найден и прочитан")
+          console.log(`📏 Размер файла: ${html.length} символов`)
 
           // Заменяем WebSocket URL на правильный для продакшена
-          const modifiedHtml = html.replace(/const WS_URL = '[^']*'/, `const WS_URL = 'wss://${req.get("host")}/ws'`)
+          const wsUrl = `wss://${req.get("host")}/ws`
+          console.log(`🔗 WebSocket URL: ${wsUrl}`)
+
+          const modifiedHtml = html.replace(/const WS_URL = '[^']*'/g, `const WS_URL = '${wsUrl}'`)
 
           res.setHeader("Content-Type", "text/html; charset=utf-8")
           res.send(modifiedHtml)
+          console.log("✅ HTML отправлен клиенту")
         } else {
           console.log("❌ HTML файл не найден, отправляем статус")
 
@@ -175,6 +181,7 @@ class MafiaGameServer {
             server: "🎭 Mafia Game Server",
             status: "running",
             message: "HTML файл игры не найден",
+            htmlPath: htmlPath,
             timestamp: new Date().toISOString(),
             uptime: Math.floor(process.uptime()),
             websocket: {
